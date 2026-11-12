@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="gu">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Bolo Marks - Voice Marks Entry for Teachers</title>
+<meta name="description" content="Free voice-based marks entry helper for government school teachers. Speak marks in Gujarati, Hindi or English.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">🎙️ Bolo Marks</div>
+  <div class="top-actions">
+    <button id="btnHelp" class="chip" type="button">?</button>
+    <button id="btnSetup" class="chip" type="button">⚙️ Setup</button>
+  </div>
+</header>
+
+<!-- SETUP SCREEN -->
+<section id="setupScreen" class="screen">
+  <h1>Class Setup</h1>
+  <p class="muted">One time only. Saved on this device.</p>
+
+  <label>Class / Section name
+    <input id="inpClass" type="text" placeholder="e.g. Std 7 A">
+  </label>
+
+  <label>Subjects with max marks <span class="muted">(one per line: Name, Max)</span>
+    <textarea id="inpSubjects" rows="4" placeholder="Maths, 50&#10;Science, 50&#10;Gujarati, 50&#10;English, 50"></textarea>
+  </label>
+
+  <label>Students <span class="muted">(one per line: Roll, Name)</span>
+    <textarea id="inpStudents" rows="8" placeholder="1, Aarav Patel&#10;2, Diya Shah&#10;3, Krishna Prajapati"></textarea>
+  </label>
+
+  <div class="row">
+    <button id="btnSaveSetup" class="primary" type="button">Save & Start</button>
+    <button id="btnDemo" class="ghost" type="button">Load demo class</button>
+  </div>
+  <p id="setupError" class="error"></p>
+</section>
+
+<!-- ENTRY SCREEN -->
+<section id="entryScreen" class="screen hidden">
+  <div class="entry-head">
+    <div>
+      <div id="classLabel" class="class-label"></div>
+      <div id="progressLabel" class="muted small"></div>
+    </div>
+    <select id="langSelect" title="Voice language">
+      <option value="gu-IN">ગુજરાતી</option>
+      <option value="hi-IN">हिन्दी</option>
+      <option value="en-IN">English</option>
+    </select>
+  </div>
+
+  <div id="statusBar" class="status">Tap the mic and speak: "roll 1" then the marks.</div>
+
+  <div class="table-wrap">
+    <table id="marksTable">
+      <thead></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div id="chooser" class="chooser hidden"></div>
+
+  <div class="actions">
+    <button id="btnExport" class="primary" type="button">⬇ Export Excel (CSV)</button>
+    <button id="btnClearAll" class="ghost" type="button">Clear marks</button>
+  </div>
+
+  <button id="btnMic" class="mic" type="button" aria-label="Toggle microphone">
+    <span id="micIcon">🎤</span>
+  </button>
+  <div id="micState" class="mic-state">Mic off</div>
+</section>
+
+<!-- HELP OVERLAY -->
+<div id="helpOverlay" class="overlay hidden">
+  <div class="card">
+    <h2>How to use</h2>
+    <ol>
+      <li>Setup: enter subjects (with max marks) and students once.</li>
+      <li>Tap the mic. Pick your language at the top.</li>
+      <li>Say <b>"roll 5"</b> to select a student, or speak the <b>student's name</b>.</li>
+      <li>Then say marks: <b>"42"</b> fills the current box and moves ahead.
+          Say several at once: <b>"42 38 45 40"</b>.</li>
+      <li>Say <b>"maths 45"</b> (or "ગણિત 45") to fill one subject directly.</li>
+      <li><b>"next"</b> = next student, <b>"clear"</b> = empty the current box, <b>"undo"</b> = undo last entry.</li>
+      <li>You can also tap any box and type.</li>
+      <li>Red box = marks above the maximum. Export gives a CSV that opens in Excel.</li>
+    </ol>
+    <button id="btnCloseHelp" class="primary" type="button">Got it</button>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script src="ui.js"></script>
+</body>
+</html>
