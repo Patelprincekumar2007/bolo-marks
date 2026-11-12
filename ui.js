@@ -296,16 +296,22 @@
       MA.ask(agentCfg().key, { students: state.students, subjects: state.subjects }, said)
         .then(function (parsed) { applyAgentResult(parsed, said); })
         .catch(function (e) {
-          var msg = e && e.message === 'bad-key' ? 'API key rejected - check Smart settings.' : 'Smart mode failed (' + (e && e.message) + ')';
-          setStatus(msg + ' Using basic mode.', 'warn');
-          rulePath(alts);
+          var m = e && e.message;
+          var reason =
+            m === 'bad-key' ? 'API key rejected (check Smart settings)' :
+            m === 'quota' ? 'free quota over for now' :
+            m === 'network' ? 'no internet' :
+            m === 'no-model' ? 'no model available for this key' :
+            m === 'empty-reply' || m === 'bad-reply' ? 'AI reply unusable' :
+            (m || 'unknown error');
+          rulePath(alts, 'Smart failed: ' + reason + ' - used basic.');
         });
       return;
     }
     rulePath(alts);
   }
 
-  function rulePath(alts) {
+  function rulePath(alts, prefix) {
     var ctx = {
       students: state.students,
       subjects: state.subjects,
@@ -319,7 +325,7 @@
       if (c.type !== 'unknown') { cmd = c; used = alts[i]; break; }
       if (!cmd) { cmd = c; used = alts[i]; }
     }
-    applyCommand(cmd, used);
+    applyCommand(cmd, used, prefix);
   }
 
   function applyAgentResult(parsed, said) {
@@ -341,21 +347,26 @@
     setStatus(parts.join(' '), mapped.unclear.length || parsed.clarify ? 'warn' : '');
   }
 
-  function applyCommand(cmd, heard) {
+  function applyCommand(cmd, heard, prefix) {
+    var prefixed = false;
+    function say(msg, kind) {
+      if (prefix && !prefixed) { prefixed = true; setStatus(prefix + ' ' + msg, kind || 'warn'); }
+      else setStatus(msg, kind);
+    }
     switch (cmd.type) {
       case 'selectRoll': {
         var idx = state.students.findIndex(function (s) { return s.roll === cmd.roll; });
-        if (idx === -1) { setStatus('Heard "' + heard + '" - no student with roll ' + cmd.roll + '.', 'warn'); return; }
+        if (idx === -1) { say('Heard "' + heard + '" - no student with roll ' + cmd.roll + '.', 'warn'); return; }
         state.curStudent = idx;
         state.curSubject = 0;
-        setStatus('Selected roll ' + cmd.roll + ' - ' + state.students[idx].name + '. Now say the marks.');
+        say('Selected roll ' + cmd.roll + ' - ' + state.students[idx].name + '. Now say the marks.');
         focusCell();
         return;
       }
       case 'selectStudent':
         state.curStudent = cmd.studentIdx;
         state.curSubject = 0;
-        setStatus('Selected ' + state.students[cmd.studentIdx].name + '. Now say the marks.');
+        say('Selected ' + state.students[cmd.studentIdx].name + '. Now say the marks.');
         focusCell();
         return;
       case 'ambiguousStudent':
@@ -363,7 +374,7 @@
         return;
       case 'selectSubject':
         state.curSubject = cmd.subjectIdx;
-        setStatus('Subject: ' + state.subjects[cmd.subjectIdx].name + '. Say the marks.');
+        say('Subject: ' + state.subjects[cmd.subjectIdx].name + '. Say the marks.');
         focusCell();
         return;
       case 'setMarks': {
@@ -379,12 +390,12 @@
         if (cmd.subjectIdx === undefined) {
           state.curSubject = Math.min(si, state.subjects.length - 1);
           if (si >= state.subjects.length) {
-            setStatus('Heard "' + heard + '" - ' + st.name + ' done (' + subjName + ' filled). Say "next" for the next student.');
+            say('Heard "' + heard + '" - ' + st.name + ' done (' + subjName + ' filled). Say "next" for the next student.');
           } else {
-            setStatus('Heard "' + heard + '" - filled for ' + st.name + '. Next box: ' + state.subjects[state.curSubject].name + '.');
+            say('Heard "' + heard + '" - filled for ' + st.name + '. Next box: ' + state.subjects[state.curSubject].name + '.');
           }
         } else {
-          setStatus('Heard "' + heard + '" - ' + cmd.values.join(', ') + ' into ' + state.subjects[cmd.subjectIdx].name + ' for ' + st.name + '.');
+          say('Heard "' + heard + '" - ' + cmd.values.join(', ') + ' into ' + state.subjects[cmd.subjectIdx].name + ' for ' + st.name + '.');
         }
         hideChooser();
         focusCell();
@@ -394,52 +405,52 @@
         if (state.curStudent < state.students.length - 1) {
           state.curStudent++;
           state.curSubject = 0;
-          setStatus('Roll ' + state.students[state.curStudent].roll + ' - ' + state.students[state.curStudent].name + '.');
+          say('Roll ' + state.students[state.curStudent].roll + ' - ' + state.students[state.curStudent].name + '.');
           focusCell();
         } else {
-          setStatus('That was the last student.', 'warn');
+          say('That was the last student.', 'warn');
         }
         return;
       case 'prev':
         if (state.curStudent > 0) {
           state.curStudent--;
           state.curSubject = 0;
-          setStatus('Roll ' + state.students[state.curStudent].roll + ' - ' + state.students[state.curStudent].name + '.');
+          say('Roll ' + state.students[state.curStudent].roll + ' - ' + state.students[state.curStudent].name + '.');
           focusCell();
         }
         return;
       case 'clear':
         setMark(state.curStudent, state.curSubject, '', false);
-        setStatus('Cleared ' + state.subjects[state.curSubject].name + ' for roll ' + state.students[state.curStudent].roll + '.');
+        say('Cleared ' + state.subjects[state.curSubject].name + ' for roll ' + state.students[state.curStudent].roll + '.');
         return;
       case 'absent': {
         var stA = state.students[state.curStudent];
         state.subjects.forEach(function (s, si) {
           if (markFor(stA.roll, si) === '') setMark(state.curStudent, si, 'AB', false);
         });
-        setStatus('Marked ' + stA.name + ' absent (AB).');
+        say('Marked ' + stA.name + ' absent (AB).');
         return;
       }
       case 'undo': {
         var h = state.history.pop();
-        if (!h) { setStatus('Nothing to undo.', 'warn'); return; }
+        if (!h) { say('Nothing to undo.', 'warn'); return; }
         setMark(h.ri, h.si, h.prev, true);
         state.curStudent = h.ri;
         state.curSubject = h.si;
-        setStatus('Undone.');
+        say('Undone.');
         focusCell();
         return;
       }
       case 'save':
         save();
-        setStatus('Saved on this device.');
+        say('Saved on this device.');
         return;
       case 'done':
         stopMic();
-        setStatus('Done. Use Export to download the sheet.');
+        say('Done. Use Export to download the sheet.');
         return;
       default:
-        setStatus('Heard "' + heard + '" - did not understand. Try "roll 5", a name, or marks.', 'warn');
+        say('Heard "' + heard + '" - did not understand. Try "roll 5", a name, or marks.', 'warn');
     }
   }
 

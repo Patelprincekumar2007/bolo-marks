@@ -145,12 +145,25 @@
   }
 
   // ---------- network (browser only) ----------
+  function genConfig(model) {
+    var cfg = { temperature: 0.1, maxOutputTokens: 1024, responseMimeType: 'application/json' };
+    // 2.5 models "think" by default and spend maxOutputTokens on hidden thoughts,
+    // which can come back as an empty reply (finishReason MAX_TOKENS). Turn it off.
+    if (model.indexOf('2.5') !== -1) cfg.thinkingConfig = { thinkingBudget: 0 };
+    return cfg;
+  }
+
   function callGemini(key, prompt, fetchImpl) {
     var doFetch = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
     if (!doFetch) return Promise.reject(new Error('no-fetch'));
     var i = 0;
+    var sawQuota = false, sawEmpty = false;
     function attempt() {
-      if (i >= MODELS.length) return Promise.reject(new Error('no-model'));
+      if (i >= MODELS.length) {
+        if (sawQuota) return Promise.reject(new Error('quota'));
+        if (sawEmpty) return Promise.reject(new Error('empty-reply'));
+        return Promise.reject(new Error('no-model'));
+      }
       var model = MODELS[i++];
       var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + encodeURIComponent(key);
       return doFetch(url, {
@@ -158,21 +171,24 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.1, maxOutputTokens: 600 }
+          generationConfig: genConfig(model)
         })
       }).then(function (r) {
         if (r.status === 404) return attempt(); // model name not available, try next
+        if (r.status === 429) { sawQuota = true; return attempt(); } // free quota over on this model, try next
         if (r.status === 400 || r.status === 403) throw new Error('bad-key');
         if (!r.ok) throw new Error('http-' + r.status);
-        return r.json();
-      });
+        return r.json().then(function (j) {
+          var cand = j && j.candidates && j.candidates[0];
+          var parts = cand && cand.content && cand.content.parts;
+          var text = parts && parts.filter(function (p) { return !p.thought; })
+            .map(function (p) { return p.text || ''; }).join(' ').trim();
+          if (!text) { sawEmpty = true; return attempt(); } // e.g. token budget eaten - try next model
+          return text;
+        });
+      }, function () { throw new Error('network'); });
     }
-    return attempt().then(function (j) {
-      var parts = j && j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts;
-      var text = parts && parts.map(function (p) { return p.text || ''; }).join(' ');
-      if (!text) throw new Error('empty-reply');
-      return text;
-    });
+    return attempt();
   }
 
   function ask(key, ctx, transcript, fetchImpl) {
