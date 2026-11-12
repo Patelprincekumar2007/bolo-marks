@@ -303,7 +303,13 @@
             m === 'network' ? 'no internet' :
             m === 'no-model' ? 'no model available for this key' :
             m === 'empty-reply' || m === 'bad-reply' ? 'AI reply unusable' :
+            m === 'service' ? 'Google service error' :
             (m || 'unknown error');
+          if (e && e.detail) {
+            var d = String(e.detail);
+            if (d.length > 140) d = d.slice(0, 140) + '...';
+            reason += ' [' + d + ']';
+          }
           rulePath(alts, 'Smart failed: ' + reason + ' - used basic.');
         });
       return;

@@ -13,8 +13,6 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash'];
-
   // ---------- prompt ----------
   function buildAgentPrompt(ctx, transcript) {
     var students = (ctx.students || []).map(function (s) { return s.roll + ': ' + s.name; }).join('\n');
@@ -145,50 +143,184 @@
   }
 
   // ---------- network (browser only) ----------
+  var API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+
+  // Preference order for ranking what ListModels returns (newest flash first).
+  // Also the static fallback when ListModels itself cannot be reached.
+  var MODELS = [
+    'gemini-flash-latest',
+    'gemini-3.8-flash',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-3-flash-preview',
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite'
+  ];
+
+  // Specialist models that speak generateContent but are not plain text chat models.
+  var NON_TEXT = /(tts|image|live|native-audio|transcribe|embedding|aqa|imagen|veo|robotics|computer-use)/i;
+
+  var CACHE_KEY = 'bolomarks_agent_model_v1';
+
+  function errWith(code, detail) {
+    var e = new Error(code);
+    e.detail = detail || '';
+    return e;
+  }
+
+  function apiError(r) {
+    return r.json().then(function (j) {
+      var m = j && j.error && j.error.message;
+      return 'HTTP ' + r.status + (m ? ': ' + m : '');
+    }, function () { return 'HTTP ' + r.status; });
+  }
+
+  function modelBase(m) { return String(m && m.name || m || '').replace(/^models\//, ''); }
+
+  function isTextModel(m) {
+    var meths = m.supportedGenerationMethods || [];
+    var b = modelBase(m);
+    return meths.indexOf('generateContent') !== -1 && /^gemini/i.test(b) && !NON_TEXT.test(b);
+  }
+
+  function rankModels(list) {
+    return list.slice().sort(function (a, b) {
+      var ba = modelBase(a), bb = modelBase(b);
+      var ia = MODELS.indexOf(ba), ib = MODELS.indexOf(bb);
+      if (ia === -1) ia = 100;
+      if (ib === -1) ib = 100;
+      return ia - ib || (ba < bb ? -1 : 1);
+    }).map(modelBase);
+  }
+
+  function cacheGet(key) {
+    try {
+      if (typeof localStorage === 'undefined') return null;
+      var c = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
+      return c && c.key === key && c.model ? c.model : null;
+    } catch (e) { return null; }
+  }
+
+  function cacheSet(key, model) {
+    try {
+      if (typeof localStorage === 'undefined') return;
+      localStorage.setItem(CACHE_KEY, JSON.stringify({ key: key, model: model }));
+    } catch (e) {}
+  }
+
+  // Ask the API which models this key can actually use (new keys cannot use retired
+  // 2.x/1.5 models, so a hardcoded list 404s). Ranked best-first.
+  function listModels(key, doFetch) {
+    return doFetch(API_BASE + '?pageSize=200&key=' + encodeURIComponent(key)).then(function (r) {
+      if (r.status === 400 || r.status === 403) {
+        return apiError(r).then(function (d) { throw errWith('bad-key', d); });
+      }
+      if (!r.ok) return apiError(r).then(function (d) { throw errWith('http-' + r.status, d); });
+      return r.json();
+    }, function () { throw errWith('network', 'could not reach Google'); }).then(function (j) {
+      var list = (j && j.models) || [];
+      var usable = rankModels(list.filter(isTextModel));
+      if (!usable.length) {
+        throw errWith('no-model', 'ListModels saw: ' + (list.slice(0, 5).map(modelBase).join(', ') || 'nothing'));
+      }
+      return usable;
+    });
+  }
+
   function genConfig(model) {
-    var cfg = { temperature: 0.1, maxOutputTokens: 1024, responseMimeType: 'application/json' };
-    // 2.5 models "think" by default and spend maxOutputTokens on hidden thoughts,
-    // which can come back as an empty reply (finishReason MAX_TOKENS). Turn it off.
-    if (model.indexOf('2.5') !== -1) cfg.thinkingConfig = { thinkingBudget: 0 };
+    var cfg = { temperature: 0.1, maxOutputTokens: 2048, responseMimeType: 'application/json' };
+    // Thinking models (2.5 and 3.x) spend maxOutputTokens on hidden thoughts and can
+    // return an empty reply (finishReason MAX_TOKENS). Turn thinking off.
+    if (/(2\.5|gemini-3)/.test(model)) cfg.thinkingConfig = { thinkingBudget: 0 };
     return cfg;
+  }
+
+  function postGenerate(doFetch, key, model, prompt, minimal) {
+    var url = API_BASE + '/' + model + ':generateContent?key=' + encodeURIComponent(key);
+    var body = { contents: [{ parts: [{ text: prompt }] }] };
+    if (!minimal) body.generationConfig = genConfig(model);
+    return doFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
   }
 
   function callGemini(key, prompt, fetchImpl) {
     var doFetch = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
-    if (!doFetch) return Promise.reject(new Error('no-fetch'));
-    var i = 0;
-    var sawQuota = false, sawEmpty = false;
-    function attempt() {
-      if (i >= MODELS.length) {
-        if (sawQuota) return Promise.reject(new Error('quota'));
-        if (sawEmpty) return Promise.reject(new Error('empty-reply'));
-        return Promise.reject(new Error('no-model'));
+    if (!doFetch) return Promise.reject(errWith('no-fetch'));
+
+    // Build the candidate model order: cached winner, then live discovery,
+    // then the static list if discovery itself is unreachable.
+    var candidatesP;
+    var cached = cacheGet(key);
+    if (cached) {
+      candidatesP = Promise.resolve([cached]);
+    } else {
+      candidatesP = listModels(key, doFetch).then(null, function (e) {
+        if (e.message === 'bad-key' || e.message === 'no-model') throw e;
+        return MODELS.slice(); // discovery unreachable: try the known list
+      });
+    }
+
+    return candidatesP.then(function (candidates) {
+      var i = 0;
+      var sawQuota = null, sawEmpty = false, sawService = null;
+      function next(errCode, detail) {
+        if (errCode === 'quota' && !sawQuota) sawQuota = detail;
+        if (errCode === 'empty') sawEmpty = true;
+        if (errCode === 'service' && !sawService) sawService = detail;
+        return attempt();
       }
-      var model = MODELS[i++];
-      var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + encodeURIComponent(key);
-      return doFetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: genConfig(model)
-        })
-      }).then(function (r) {
-        if (r.status === 404) return attempt(); // model name not available, try next
-        if (r.status === 429) { sawQuota = true; return attempt(); } // free quota over on this model, try next
-        if (r.status === 400 || r.status === 403) throw new Error('bad-key');
-        if (!r.ok) throw new Error('http-' + r.status);
+      function attempt() {
+        if (i >= candidates.length) {
+          if (cached) { // cached model stopped working: drop it and rediscover once
+            cached = null;
+            return listModels(key, doFetch).then(function (fresh) {
+              candidates = fresh.filter(function (m) { return candidates.indexOf(m) === -1; });
+              i = 0;
+              if (!candidates.length) throw errWith('no-model', 'cached model gone, nothing else usable');
+              return attempt();
+            });
+          }
+          if (sawQuota) throw errWith('quota', sawQuota);
+          if (sawEmpty) throw errWith('empty-reply', 'models replied with no text');
+          if (sawService) throw errWith('service', sawService);
+          throw errWith('no-model', 'no candidate model answered');
+        }
+        var model = candidates[i++];
+        return postGenerate(doFetch, key, model, prompt, false).then(function (r) {
+          if (r.status === 404) return apiError(r).then(function (d) { return next('service', d); });
+          if (r.status === 429) return apiError(r).then(function (d) { return next('quota', d); });
+          if (r.status === 403) return apiError(r).then(function (d) { throw errWith('bad-key', d); });
+          if (r.status === 400) {
+            return apiError(r).then(function (d) {
+              if (/api.?key|key not valid|key_invalid|permission/i.test(d)) throw errWith('bad-key', d);
+              // request shape rejected (e.g. unknown config field): retry bare minimum for this model
+              return postGenerate(doFetch, key, model, prompt, true).then(function (r2) {
+                if (!r2.ok) return apiError(r2).then(function (d2) { return next('service', d2); });
+                return readText(r2, model);
+              });
+            });
+          }
+          if (!r.ok) return apiError(r).then(function (d) { return next('service', d); });
+          return readText(r, model);
+        }, function () { throw errWith('network', 'could not reach Google'); });
+      }
+      function readText(r, model) {
         return r.json().then(function (j) {
           var cand = j && j.candidates && j.candidates[0];
           var parts = cand && cand.content && cand.content.parts;
           var text = parts && parts.filter(function (p) { return !p.thought; })
             .map(function (p) { return p.text || ''; }).join(' ').trim();
-          if (!text) { sawEmpty = true; return attempt(); } // e.g. token budget eaten - try next model
+          if (!text) return next('empty');
+          cacheSet(key, model);
           return text;
         });
-      }, function () { throw new Error('network'); });
-    }
-    return attempt();
+      }
+      return attempt();
+    });
   }
 
   function ask(key, ctx, transcript, fetchImpl) {
