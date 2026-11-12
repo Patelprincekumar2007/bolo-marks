@@ -188,6 +188,7 @@
     clear: ['clear', 'delete', 'remove', 'saaf', 'saf', 'સાફ', 'हटाओ', 'hatao', 'કાઢી', 'કાઢો'],
     undo: ['undo', 'pacho', 'પાછો'],
     save: ['save', 'સેવ', 'सेव'],
+    absent: ['absent', 'gairhazar', 'gair hazar', 'ગેરહાજર', 'ગેર હાજર', 'अनुपस्थित', 'गैरहाजिर'],
     done: ['done', 'finish', 'finished', 'થઈ ગયું', 'पूरा', 'pura', 'patyu', 'પત્યું', 'complete']
   };
 
@@ -346,8 +347,56 @@
     return { type: 'unknown', text: text };
   }
 
+  // ---------- class summary / insights ----------
+  // marks: { roll: { subjectIdx: value } }; value may be number, numeric string or 'AB'
+  function summarize(students, subjects, marks) {
+    var perSubject = subjects.map(function (sub, si) {
+      var entered = 0, absent = 0, sum = 0;
+      var high = null, low = null;
+      var weak = [];
+      students.forEach(function (st) {
+        var m = marks[st.roll] || {};
+        var v = m[si];
+        if (v === undefined || v === '') return;
+        if (String(v).toUpperCase() === 'AB') { absent++; return; }
+        var n = Number(v);
+        if (isNaN(n)) return;
+        entered++;
+        sum += n;
+        if (!high || n > high.value) high = { name: st.name, value: n };
+        if (!low || n < low.value) low = { name: st.name, value: n };
+        if (sub.max > 0 && n < 0.35 * sub.max) weak.push(st.name);
+      });
+      return {
+        name: sub.name, max: sub.max, entered: entered, absent: absent,
+        avg: entered ? Math.round((sum / entered) * 10) / 10 : null,
+        avgPct: entered && sub.max ? Math.round((sum / entered) / sub.max * 100) : null,
+        highest: high, lowest: low, weak: weak
+      };
+    });
+    var totalCells = students.length * subjects.length;
+    var filled = 0, absentCells = 0;
+    students.forEach(function (st) {
+      var m = marks[st.roll] || {};
+      subjects.forEach(function (sub, si) {
+        var v = m[si];
+        if (v === undefined || v === '') return;
+        if (String(v).toUpperCase() === 'AB') absentCells++;
+        else filled++;
+      });
+    });
+    return {
+      perSubject: perSubject,
+      totalCells: totalCells,
+      filled: filled,
+      absentCells: absentCells,
+      missing: totalCells - filled - absentCells
+    };
+  }
+
   function validateMark(value, max) {
     if (value === null || value === undefined || value === '') return { ok: true };
+    if (String(value).toUpperCase() === 'AB') return { ok: true }; // absent marker
     var v = Number(value);
     if (isNaN(v)) return { ok: false, reason: 'not-a-number' };
     if (v < 0) return { ok: false, reason: 'negative' };
@@ -364,6 +413,7 @@
     matchStudentName: matchStudentName,
     findSubject: findSubject,
     validateMark: validateMark,
+    summarize: summarize,
     WORD_NUMS: WORD_NUMS
   };
 });

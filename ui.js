@@ -2,7 +2,15 @@
 (function () {
   'use strict';
   var MV = window.MarksVoice;
+  var MA = window.MarksAgent;
   var LS_KEY = 'bolomarks_v1';
+  var AGENT_KEY = 'bolomarks_agent';
+
+  // ---------- smart agent settings (BYOK; key stays on this device only) ----------
+  function agentCfg() {
+    try { return JSON.parse(localStorage.getItem(AGENT_KEY) || '{}'); } catch (e) { return {}; }
+  }
+  function smartOn() { var c = agentCfg(); return !!(c.smart && c.key); }
 
   var state = {
     className: '',
@@ -139,7 +147,8 @@
     if (!m) return '';
     var t = 0, any = false;
     state.subjects.forEach(function (s, si) {
-      if (m[si] !== undefined && m[si] !== '') { t += Number(m[si]) || 0; any = true; }
+      var v = m[si];
+      if (v !== undefined && v !== '' && !isNaN(Number(v))) { t += Number(v); any = true; }
     });
     return any ? t : '';
   }
@@ -179,6 +188,7 @@
       var m = state.marks[st.roll] || {};
       state.subjects.forEach(function (s, si) {
         if (m[si] !== undefined && m[si] !== '') {
+          if (String(m[si]).toUpperCase() === 'AB') return; // absent does not count as entered
           filled++;
           if (!MV.validateMark(m[si], s.max).ok) errors++;
         }
@@ -280,6 +290,22 @@
   });
 
   function handleTranscript(alts) {
+    if (smartOn() && MA) {
+      var said = alts[0];
+      setStatus('Smart mode: understanding "' + said + '" ...');
+      MA.ask(agentCfg().key, { students: state.students, subjects: state.subjects }, said)
+        .then(function (parsed) { applyAgentResult(parsed, said); })
+        .catch(function (e) {
+          var msg = e && e.message === 'bad-key' ? 'API key rejected - check Smart settings.' : 'Smart mode failed (' + (e && e.message) + ')';
+          setStatus(msg + ' Using basic mode.', 'warn');
+          rulePath(alts);
+        });
+      return;
+    }
+    rulePath(alts);
+  }
+
+  function rulePath(alts) {
     var ctx = {
       students: state.students,
       subjects: state.subjects,
@@ -294,6 +320,25 @@
       if (!cmd) { cmd = c; used = alts[i]; }
     }
     applyCommand(cmd, used);
+  }
+
+  function applyAgentResult(parsed, said) {
+    var mapped = MA.mapActions(parsed, { students: state.students, subjects: state.subjects }, MV);
+    var wrote = 0;
+    mapped.ops.forEach(function (op) {
+      setMark(op.studentIdx, op.subjectIdx, op.value, false);
+      state.curStudent = op.studentIdx;
+      state.curSubject = Math.min(op.subjectIdx + 1, state.subjects.length - 1);
+      wrote++;
+    });
+    hideChooser();
+    focusCell();
+    var parts = [];
+    if (wrote) parts.push('Wrote ' + wrote + ' entr' + (wrote === 1 ? 'y' : 'ies') + (parsed.heard ? ' (' + parsed.heard + ')' : '') + '.');
+    if (parsed.clarify) parts.push('Question: ' + parsed.clarify);
+    mapped.unclear.forEach(function (u) { parts.push(u); });
+    if (!parts.length) parts.push('Heard "' + said + '" but found nothing to write. Try again.');
+    setStatus(parts.join(' '), mapped.unclear.length || parsed.clarify ? 'warn' : '');
   }
 
   function applyCommand(cmd, heard) {
@@ -367,6 +412,14 @@
         setMark(state.curStudent, state.curSubject, '', false);
         setStatus('Cleared ' + state.subjects[state.curSubject].name + ' for roll ' + state.students[state.curStudent].roll + '.');
         return;
+      case 'absent': {
+        var stA = state.students[state.curStudent];
+        state.subjects.forEach(function (s, si) {
+          if (markFor(stA.roll, si) === '') setMark(state.curStudent, si, 'AB', false);
+        });
+        setStatus('Marked ' + stA.name + ' absent (AB).');
+        return;
+      }
       case 'undo': {
         var h = state.history.pop();
         if (!h) { setStatus('Nothing to undo.', 'warn'); return; }
@@ -418,7 +471,10 @@
     var rows = [head];
     state.students.forEach(function (st) {
       var row = [st.roll, st.name];
-      state.subjects.forEach(function (s, si) { row.push(markFor(st.roll, si)); });
+      state.subjects.forEach(function (s, si) {
+        var v = markFor(st.roll, si);
+        row.push(String(v).toUpperCase() === 'AB' ? 'Absent' : v);
+      });
       row.push(totalFor(st.roll));
       rows.push(row);
     });
@@ -454,6 +510,80 @@
   // ---------- help ----------
   $('btnHelp').addEventListener('click', function () { $('helpOverlay').classList.remove('hidden'); });
   $('btnCloseHelp').addEventListener('click', function () { $('helpOverlay').classList.add('hidden'); });
+
+  // ---------- copy column + summary ----------
+  function copyText(t, okMsg) {
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = t;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); setStatus(okMsg); }
+      catch (e) { setStatus('Copy failed on this browser.', 'err'); }
+      ta.remove();
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(t).then(function () { setStatus(okMsg); }, fallback);
+    } else fallback();
+  }
+
+  $('btnCopy').addEventListener('click', function () {
+    var si = state.curSubject;
+    var sub = state.subjects[si];
+    var lines = state.students.map(function (st) {
+      var v = markFor(st.roll, si);
+      return String(v).toUpperCase() === 'AB' ? 'AB' : String(v);
+    });
+    copyText(lines.join('\n'), 'Copied ' + sub.name + ' column (' + state.students.length + ' rows, roll order). Paste it into your portal or sheet.');
+  });
+
+  $('btnSummary').addEventListener('click', function () {
+    var s = MV.summarize(state.students, state.subjects, state.marks);
+    var h = '<h2>📊 Class summary</h2>';
+    h += '<p class="muted">' + s.filled + ' marks entered, ' + s.absentCells + ' absent, ' + s.missing + ' still empty.</p>';
+    s.perSubject.forEach(function (p) {
+      h += '<div class="sum-sub"><b>' + esc(p.name) + '</b> <span class="muted small">(/' + p.max + ')</span><br>';
+      if (!p.entered) { h += '<span class="muted">No marks yet.</span>'; }
+      else {
+        h += 'Average: <b>' + p.avg + '</b> (' + p.avgPct + '%) · ';
+        h += 'Highest: ' + esc(p.highest.name) + ' (' + p.highest.value + ') · ';
+        h += 'Lowest: ' + esc(p.lowest.name) + ' (' + p.lowest.value + ')';
+        if (p.absent) h += '<br>Absent: ' + p.absent;
+        if (p.weak.length) h += '<br><span class="weak">Needs attention (&lt;35%): ' + p.weak.map(esc).join(', ') + '</span>';
+      }
+      h += '</div>';
+    });
+    $('summaryBody').innerHTML = h;
+    $('summaryOverlay').classList.remove('hidden');
+  });
+  $('btnCloseSummary').addEventListener('click', function () { $('summaryOverlay').classList.add('hidden'); });
+
+  // ---------- smart settings ----------
+  $('btnSmart').addEventListener('click', function () {
+    var c = agentCfg();
+    $('inpKey').value = c.key || '';
+    $('chkSmart').checked = c.smart !== false;
+    $('smartStatus').textContent = c.key ? 'A key is saved on this device.' : 'No key yet. The free Gemini key works.';
+    $('smartOverlay').classList.remove('hidden');
+  });
+  $('btnSaveSmart').addEventListener('click', function () {
+    var key = $('inpKey').value.trim();
+    var cfg = { key: key, smart: $('chkSmart').checked && !!key };
+    try { localStorage.setItem(AGENT_KEY, JSON.stringify(cfg)); } catch (e) {}
+    $('smartStatus').textContent = key ? 'Saved on this device only. Smart mode is ' + (cfg.smart ? 'ON.' : 'off.') : 'Key removed. Basic voice mode still works.';
+    setTimeout(function () { $('smartOverlay').classList.add('hidden'); }, 700);
+  });
+  $('btnCloseSmart').addEventListener('click', function () { $('smartOverlay').classList.add('hidden'); });
+
+  // ---------- typed commands ----------
+  function runTyped() {
+    var v = $('inpCmd').value.trim();
+    if (!v) return;
+    $('inpCmd').value = '';
+    handleTranscript([v]);
+  }
+  $('btnGo').addEventListener('click', runTyped);
+  $('inpCmd').addEventListener('keydown', function (e) { if (e.key === 'Enter') runTyped(); });
 
   // ---------- boot ----------
   if (location.hash === '#demo') {

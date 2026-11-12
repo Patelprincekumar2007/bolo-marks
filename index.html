@@ -12,6 +12,7 @@
 <header class="topbar">
   <div class="brand">🎙️ Bolo Marks</div>
   <div class="top-actions">
+    <button id="btnSmart" class="chip" type="button">✨ Smart</button>
     <button id="btnHelp" class="chip" type="button">?</button>
     <button id="btnSetup" class="chip" type="button">⚙️ Setup</button>
   </div>
@@ -57,6 +58,11 @@
 
   <div id="statusBar" class="status">Tap the mic and speak: "roll 1" then the marks.</div>
 
+  <div class="cmd-row">
+    <input id="inpCmd" type="text" placeholder='Type or say: "Diya ne maths ma 47"' autocomplete="off">
+    <button id="btnGo" class="primary" type="button">Go</button>
+  </div>
+
   <div class="table-wrap">
     <table id="marksTable">
       <thead></thead>
@@ -68,6 +74,8 @@
 
   <div class="actions">
     <button id="btnExport" class="primary" type="button">⬇ Export Excel (CSV)</button>
+    <button id="btnCopy" class="ghost" type="button">📋 Copy column</button>
+    <button id="btnSummary" class="ghost" type="button">📊 Summary</button>
     <button id="btnClearAll" class="ghost" type="button">Clear marks</button>
   </div>
 
@@ -76,6 +84,35 @@
   </button>
   <div id="micState" class="mic-state">Mic off</div>
 </section>
+
+<!-- SUMMARY OVERLAY -->
+<div id="summaryOverlay" class="overlay hidden">
+  <div class="card">
+    <div id="summaryBody"></div>
+    <button id="btnCloseSummary" class="primary" type="button">Close</button>
+  </div>
+</div>
+
+<!-- SMART SETTINGS OVERLAY -->
+<div id="smartOverlay" class="overlay hidden">
+  <div class="card">
+    <h2>✨ Smart mode (AI agent)</h2>
+    <p>Understands full sentences like <b>"Diya ne maths ma 47, Rohan absent"</b> and fills the table. Without a key, the basic voice commands keep working.</p>
+    <ol>
+      <li>Get a free Gemini API key at <b>aistudio.google.com</b> (Get API key - no card needed).</li>
+      <li>Paste it below. It is saved <b>only on this device</b>, never in the code.</li>
+    </ol>
+    <label>Gemini API key
+      <input id="inpKey" type="password" placeholder="AIza..." autocomplete="off">
+    </label>
+    <label class="checkline"><input id="chkSmart" type="checkbox" checked> Smart mode on (falls back to basic commands on any error)</label>
+    <p id="smartStatus" class="muted small"></p>
+    <div class="row">
+      <button id="btnSaveSmart" class="primary" type="button">Save</button>
+      <button id="btnCloseSmart" class="ghost" type="button">Close</button>
+    </div>
+  </div>
+</div>
 
 <!-- HELP OVERLAY -->
 <div id="helpOverlay" class="overlay hidden">
@@ -88,15 +125,17 @@
       <li>Then say marks: <b>"42"</b> fills the current box and moves ahead.
           Say several at once: <b>"42 38 45 40"</b>.</li>
       <li>Say <b>"maths 45"</b> (or "ગણિત 45") to fill one subject directly.</li>
-      <li><b>"next"</b> = next student, <b>"clear"</b> = empty the current box, <b>"undo"</b> = undo last entry.</li>
-      <li>You can also tap any box and type.</li>
-      <li>Red box = marks above the maximum. Export gives a CSV that opens in Excel.</li>
+      <li><b>"next"</b> = next student, <b>"clear"</b> = empty the current box, <b>"undo"</b> = undo last entry, <b>"absent"</b> = mark the student absent (AB).</li>
+      <li>You can also tap any box and type, or use the type box above the table.</li>
+      <li><b>Smart mode</b> (✨ top right): paste a free Gemini key once, then say whole sentences like "Diya ne maths ma 47, Rohan absent".</li>
+      <li>Red box = marks above the maximum. Export gives a CSV that opens in Excel. <b>Copy column</b> copies one subject's marks in roll order to paste into any portal. <b>Summary</b> shows averages, toppers and students below 35%.</li>
     </ol>
     <button id="btnCloseHelp" class="primary" type="button">Got it</button>
   </div>
 </div>
 
 <script src="app.js"></script>
+<script src="agent.js"></script>
 <script src="ui.js"></script>
 </body>
 </html>

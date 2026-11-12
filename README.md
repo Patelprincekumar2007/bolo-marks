@@ -9,15 +9,21 @@ Government school teachers in India spend hours every exam season typing student
 ## Features
 
 - Voice entry in Gujarati, Hindi and English (Web Speech API, free in Chrome)
+- **Smart mode (AI agent):** paste your own free Gemini API key once (saved only on your device, never in the code), then speak full sentences like "Diya ne maths ma 47, Rohan absent". The agent turns them into table actions; marks above the maximum are refused and unclear items are asked back. Without a key, the basic voice commands keep working offline.
 - Speak roll number ("roll 5", "રોલ ૫", "रोल पांच") or the student's name
 - Speak one mark or a whole row ("42 38 45 40"), or one subject ("maths 45", "ગણિત પિસ્તાલીસ")
 - Understands number words 0-100 in all three languages, plus native digits (૭૮, ७८)
 - Live validation: marks above the subject maximum turn red instantly
-- Voice commands: next, previous, clear, undo, save, done
+- Absent marking (AB), voice commands: next, previous, clear, undo, save, done
 - Ambiguous names: tap to pick from a short list
-- Export to CSV that opens directly in Excel (Gujarati/Hindi names preserved)
+- Type box as an alternative to voice (works without a mic)
+- Export to CSV that opens directly in Excel (Gujarati/Hindi names preserved, totals and Absent included)
 - Works fully offline after first load; class data saved on the device (localStorage)
 - Mobile-first: big mic button, works on a phone in one hand
+
+## Privacy and keys
+
+The app ships with **no API key**. Smart mode uses the bring-your-own-key pattern: each user pastes their own free key (Google AI Studio) once, and it is stored only in that browser's localStorage. Marks data never leaves the device except the single Smart-mode request, which contains the sentence spoken plus the class roster needed to understand it.
 
 ## Live demo
 
@@ -47,8 +53,9 @@ Open `index.html` in Chrome. That is the whole setup. For voice input, serve it 
 | `index.html` | The whole app shell (setup screen + entry screen) |
 | `style.css` | Mobile-first styling |
 | `app.js` | Voice parsing engine: number words (GU/HI/EN, 0-100), commands, name matching, validation |
-| `ui.js` | Table, mic control, CSV export, localStorage |
-| `test.js` | Node test suite for the parser (`node test.js`, 43 tests) |
+| `agent.js` | Smart mode: prompt builder, strict JSON response parsing, action mapping and validation, Gemini (BYOK) call with model fallback |
+| `ui.js` | Table, mic control, Smart mode wiring, CSV export, localStorage |
+| `test.js` | Node test suite for the parser and agent layer (`node test.js`, 61 tests) |
 
 ## Impact
 

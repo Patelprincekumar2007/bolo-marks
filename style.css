@@ -78,6 +78,16 @@ td.total { font-weight: 700; background: #f7f9fb; }
 
 .actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
 
+.cmd-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.cmd-row input { flex: 1; margin-top: 0; }
+.cmd-row .primary { padding: 10px 16px; }
+
+.checkline { display: flex; align-items: center; gap: 8px; font-weight: 500; margin-top: 12px; }
+.checkline input { width: auto; }
+
+.sum-sub { margin: 12px 0; padding: 10px; background: #f7f9fb; border-radius: 8px; line-height: 1.5; }
+.weak { color: #a93226; font-weight: 600; }
+
 .mic {
   position: fixed; right: 18px; bottom: 56px; z-index: 30;
   width: 68px; height: 68px; border-radius: 50%; border: none; cursor: pointer;
